@@ -2,7 +2,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 import matplotlib.pyplot as plt
-from .terrain import generate_reference_and_limits
+from terrain import generate_reference_and_limits
+import pandas as pd  # Add this import at the top
+#from .control import PDController  # Add this import
+
 
 class Submarine:
     def __init__(self):
@@ -62,6 +65,8 @@ class Trajectory:
         plt.legend(loc='upper right')
         plt.show()
 
+
+
 @dataclass
 class Mission:
     reference: np.ndarray
@@ -75,29 +80,47 @@ class Mission:
 
     @classmethod
     def from_csv(cls, file_name: str):
-        # You are required to implement this method
-        pass
+        # Read the CSV file using pandas
+        data = pd.read_csv(file_name)
 
+        # Extract the columns assuming they are named 'reference', 'cave_height', and 'cave_depth'
+        reference = data['reference'].to_numpy()
+        cave_height = data['cave_height'].to_numpy()
+        cave_depth = data['cave_depth'].to_numpy()
 
+        return cls(reference, cave_height, cave_depth)  # Return an instance of Mission
+
+class PDController:
+    def __init__(self, KP: float, KD: float):
+        self.KP = KP
+        self.KD = KD
+        self.previous_error = 0
+
+    def compute_control(self, reference: float, output: float) -> float:
+        error = reference - output
+        control_action = self.KP * error + self.KD * (error - self.previous_error)
+        self.previous_error = error
+        return control_action
+    
 class ClosedLoop:
-    def __init__(self, plant: Submarine, controller):
+    def __init__(self, plant: Submarine, controller: PDController):
         self.plant = plant
         self.controller = controller
 
-    def simulate(self,  mission: Mission, disturbances: np.ndarray) -> Trajectory:
-
+    def simulate(self, mission: Mission, disturbances: np.ndarray) -> Trajectory:
         T = len(mission.reference)
         if len(disturbances) < T:
             raise ValueError("Disturbances must be at least as long as mission duration")
         
         positions = np.zeros((T, 2))
-        actions = np.zeros(T)
         self.plant.reset_state()
+        actions = np.zeros(T)  # Add this line to initialize actions
 
         for t in range(T):
             positions[t] = self.plant.get_position()
             observation_t = self.plant.get_depth()
-            # Call your controller here
+            reference_t = mission.reference[t]  # Get the current reference
+            actions[t] = self.controller.compute_control(reference_t, observation_t)  # Compute control action
             self.plant.transition(actions[t], disturbances[t])
 
         return Trajectory(positions)
